@@ -1,42 +1,75 @@
 export const runtime = 'edge';
 
 /**
- * LANDER TO OFFER REDIRECT (/click)
- * Called when a user clicks the "Call to Action" on your landing page.
+ * DYNAMIC CAMPAIGN TRACKER (/[slug])
+ * Captures all defined parameters and logs them to Analytics Engine for detailed reporting.
  */
-export async function GET(request: Request) {
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ slug: string }> }
+) {
+  const { slug } = await params;
   const url = new URL(request.url);
-  const cmp = url.searchParams.get("cmp");
-  const cid = url.searchParams.get("cid");
-
-  if (!cmp) return new Response("Missing Campaign", { status: 400 });
 
   try {
     const { getRequestContext } = await import('@cloudflare/next-on-pages');
     const { env } = getRequestContext() as { env: CloudflareEnv };
 
-    // 1. Get campaign config from KV
-    const campaignData = await env.CAMPAIGNS.get(cmp);
-    if (!campaignData) return new Response("Campaign Not Found", { status: 404 });
+    const campaignData = await env.CAMPAIGNS.get(slug);
+    
+    if (!campaignData) {
+      return new Response("Not Found", { status: 404 });
+    }
 
     const campaign = JSON.parse(campaignData);
+    const clickId = crypto.randomUUID();
 
-    // 2. Log Lander Click to Analytics Engine
+    // 1. Capture dynamic parameters from Traffic Source
+    let paramConfig = [];
+    try {
+        paramConfig = typeof campaign.params === 'string' ? JSON.parse(campaign.params) : (campaign.params || []);
+    } catch (e) {
+        paramConfig = [];
+    }
+
+    // Map captured values for the report (Blobs 5-10)
+    const capturedValues = paramConfig.map((p: any) => url.searchParams.get(p.key) || "none");
+
+    // 2. Log Visit to Analytics Engine with ALL Captured Params
     if (env.ANALYTICS) {
       env.ANALYTICS.writeDataPoint({
-        blobs: [cmp, "lander_click", cid || "no-id", "XX"],
+        blobs: [
+          slug,           // blob1: campaign
+          "visit",        // blob2: type
+          clickId,        // blob3: click_id
+          // @ts-ignore
+          request.cf?.country || "XX", // blob4: geo
+          capturedValues[0] || "none", // blob5: Custom Param 1
+          capturedValues[1] || "none", // blob6: Custom Param 2
+          capturedValues[2] || "none", // blob7: Custom Param 3
+          capturedValues[3] || "none", // blob8: Custom Param 4
+          capturedValues[4] || "none", // blob9: Custom Param 5
+          capturedValues[5] || "none", // blob10: Custom Param 6
+        ],
         doubles: [1],
-        indexes: [cmp]
+        indexes: [slug]
       });
     }
 
-    // 3. Construct Offer URL with CID for postback tracking
-    const offerUrl = new URL(campaign.offer_url);
-    offerUrl.searchParams.set("cid", cid || "no-id");
-    offerUrl.searchParams.set("cmp", cmp);
+    // 3. Construct Destination URL (Lander)
+    const dest = new URL(campaign.lander_url);
+    dest.searchParams.set("cid", clickId);
+    dest.searchParams.set("cmp", slug);
+    
+    // Forward all original parameters to the lander
+    url.searchParams.forEach((val, key) => {
+      dest.searchParams.set(key, val);
+    });
 
-    return Response.redirect(offerUrl.toString(), 302);
+    return Response.redirect(dest.toString(), 302);
+    
   } catch (err) {
-    return new Response("Error", { status: 500 });
+    console.error("Tracker Error:", err);
+    return new Response("Tracker Error", { status: 500 });
   }
 }
