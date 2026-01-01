@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'edge';
+
 async function getCfEnv(req: NextRequest) {
     // This is a placeholder for getting bindings in a real Cloudflare environment
     // In a local dev setup, you might use a .dev.vars file or similar
