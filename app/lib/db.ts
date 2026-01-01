@@ -65,13 +65,20 @@ export async function getInfrastructureData() {
 export async function deleteRecord(table: string, id: string) {
   const db = await getDb();
   
+  // Validate table name to prevent SQL issues
+  const validTables = ['landers', 'offers', 'traffic_sources', 'campaigns'];
+  if (!validTables.includes(table)) {
+    throw new Error(`Invalid table: ${table}`);
+  }
+  
   // If deleting a campaign, also remove from KV redirect engine
   if (table === 'campaigns') {
     const kv = await getKv();
     await kv.delete(id);
   }
   
-  return await db.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(id).run();
+  // Use quoted table names for safety with D1
+  return await db.prepare(`DELETE FROM "${table}" WHERE id = ?`).bind(id).run();
 }
 
 /**
@@ -88,6 +95,19 @@ export async function addInfrastructure(table: string, data: any) {
   
   return await db.prepare(`INSERT INTO ${table} (id, name, url) VALUES (?, ?, ?)`)
     .bind(id, data.name, data.url).run();
+}
+
+/**
+ * UPDATE ASSET
+ */
+export async function updateInfrastructure(table: string, id: string, data: any) {
+  const db = await getDb();
+  const valueColumn = table === 'traffic_sources' ? 'params' : 'url';
+  const value = table === 'traffic_sources' ? data.params : data.url;
+
+  return await db.prepare(`UPDATE "${table}" SET name = ?, ${valueColumn} = ? WHERE id = ?`)
+    .bind(data.name, value, id)
+    .run();
 }
 
 /**
