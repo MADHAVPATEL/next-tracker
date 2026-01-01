@@ -13,6 +13,7 @@ import {
   getInfrastructureData, 
   getCampaignStats 
 } from '@/app/lib/db';
+import CopyInput from '@/app/components/CopyInput';
 
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
@@ -217,28 +218,9 @@ export default async function CampaignsPage({ searchParams }: Props) {
                         {c.ts_name || 'Direct'}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2 mt-3">
-                       <input 
-                         readOnly 
-                         value={finalLink} 
-                         className="bg-slate-100 text-[10px] px-3 py-2 rounded-xl border border-slate-200 w-80 font-mono text-slate-500 outline-none cursor-pointer" 
-                         onClick={(e) => (e.target as HTMLInputElement).select()}
-                       />
-                       <button 
-                         title="Copy Tracking Link"
-                         className="p-2.5 text-indigo-500 hover:bg-white rounded-xl border border-transparent hover:border-slate-100 shadow-sm"
-                         onClick={() => {
-                           const el = document.createElement('textarea');
-                           el.value = finalLink;
-                           document.body.appendChild(el);
-                           el.select();
-                           document.execCommand('copy');
-                           document.body.removeChild(el);
-                         }}
-                       >
-                         <Copy size={14} />
-                       </button>
-                    </div>
+                      <div className="flex items-center gap-2 mt-3">
+                        <CopyInput value={finalLink} />
+                      </div>
                   </td>
                   <td className="px-8 py-6">
                     <div className="flex items-center gap-10">
