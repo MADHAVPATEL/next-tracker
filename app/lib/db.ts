@@ -5,9 +5,14 @@
 export async function getDb() {
   try {
     const { getRequestContext } = await import('@cloudflare/next-on-pages');
-    const { env } = getRequestContext() as { env: CloudflareEnv };
-    return env.DB;
+    const context = getRequestContext();
+    if (!context || !context.env || !context.env.DB) {
+       throw new Error("D1 Database binding 'DB' not found");
+    }
+    return context.env.DB;
   } catch (e) {
+    console.error("getDb Error:", e);
+    // Return a mock object to prevent calling .prepare() on undefined
     return {
       prepare: (query: string) => ({
         bind: (...args: any[]) => ({
@@ -26,9 +31,13 @@ export async function getDb() {
 export async function getKv() {
   try {
     const { getRequestContext } = await import('@cloudflare/next-on-pages');
-    const { env } = getRequestContext() as { env: CloudflareEnv };
-    return env.CAMPAIGNS;
+    const context = getRequestContext();
+    if (!context || !context.env || !context.env.CAMPAIGNS) {
+      throw new Error("KV binding 'CAMPAIGNS' not found");
+    }
+    return context.env.CAMPAIGNS;
   } catch (e) {
+    console.error("getKv Error:", e);
     return { get: async () => null, put: async () => {}, delete: async () => {} };
   }
 }
@@ -39,9 +48,9 @@ export async function getKv() {
 export async function getCampaignStats() {
   try {
     const { getRequestContext } = await import('@cloudflare/next-on-pages');
-    const { env } = getRequestContext() as { env: CloudflareEnv };
+    const context = getRequestContext();
+    const env = (context?.env || {}) as CloudflareEnv;
 
-    // These must be defined in your Cloudflare Pages dashboard environment variables
     if (!env.CLOUDFLARE_API_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) {
       return {};
     }
@@ -61,40 +70,47 @@ export async function getCampaignStats() {
       }
     );
 
-    const json = await res.json() as any;
     if (!res.ok) return {};
-
+    const json = await res.json() as any;
+    
     const stats: Record<string, { visits: number; clicks: number; revenue: number }> = {};
-    for (const row of json.data) {
-      if (!stats[row.cmp]) stats[row.cmp] = { visits: 0, clicks: 0, revenue: 0 };
-      if (row.type === "visit") stats[row.cmp].visits += row.val;
-      if (row.type === "lander_click") stats[row.cmp].clicks += row.val;
-      if (row.type === "conversion") stats[row.cmp].revenue += row.val;
+    if (json && json.data && Array.isArray(json.data)) {
+        for (const row of json.data) {
+          if (!stats[row.cmp]) stats[row.cmp] = { visits: 0, clicks: 0, revenue: 0 };
+          if (row.type === "visit") stats[row.cmp].visits += row.val;
+          if (row.type === "lander_click") stats[row.cmp].clicks += row.val;
+          if (row.type === "conversion") stats[row.cmp].revenue += row.val;
+        }
     }
     return stats;
   } catch (e) {
+    console.error("Stats Error:", e);
     return {};
   }
 }
 
 export async function getInfrastructureData() {
-  const db = await getDb();
-  const [landers, offers, sources] = await Promise.all([
-    db.prepare("SELECT * FROM landers ORDER BY id DESC").all(),
-    db.prepare("SELECT * FROM offers ORDER BY id DESC").all(),
-    db.prepare("SELECT * FROM traffic_sources ORDER BY id DESC").all(),
-  ]);
+  try {
+    const db = await getDb();
+    const [landers, offers, sources] = await Promise.all([
+      db.prepare("SELECT * FROM landers ORDER BY id DESC").all(),
+      db.prepare("SELECT * FROM offers ORDER BY id DESC").all(),
+      db.prepare("SELECT * FROM traffic_sources ORDER BY id DESC").all(),
+    ]);
 
-  return {
-    landers: landers.results || [],
-    offers: offers.results || [],
-    sources: (sources.results || []).map((s: any) => {
-      let parsed = [];
-      try { parsed = typeof s.params === 'string' ? JSON.parse(s.params) : (s.params || []); } 
-      catch (e) { parsed = []; }
-      return { ...s, params: parsed };
-    })
-  };
+    return {
+      landers: landers.results || [],
+      offers: offers.results || [],
+      sources: (sources.results || []).map((s: any) => {
+        let parsed = [];
+        try { parsed = typeof s.params === 'string' ? JSON.parse(s.params) : (s.params || []); } 
+        catch (e) { parsed = []; }
+        return { ...s, params: parsed };
+      })
+    };
+  } catch (e) {
+    return { landers: [], offers: [], sources: [] };
+  }
 }
 
 export async function deleteRecord(table: string, id: string) {
@@ -137,21 +153,25 @@ export async function launchCampaign(data: {
   const kv = await getKv();
   const slug = data.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 
-  const lander = await db.prepare("SELECT url FROM landers WHERE id = ?").bind(data.landerId).first() as any;
-  const offer = await db.prepare("SELECT url FROM offers WHERE id = ?").bind(data.offerId).first() as any;
-  const ts = await db.prepare("SELECT params FROM traffic_sources WHERE id = ?").bind(data.trafficSourceId).first() as any;
+  try {
+    const lander = await db.prepare("SELECT url FROM landers WHERE id = ?").bind(data.landerId).first() as any;
+    const offer = await db.prepare("SELECT url FROM offers WHERE id = ?").bind(data.offerId).first() as any;
+    const ts = await db.prepare("SELECT params FROM traffic_sources WHERE id = ?").bind(data.trafficSourceId).first() as any;
 
-  await db.prepare("INSERT INTO campaigns (id, name, lander_id, offer_id, traffic_source_id, status) VALUES (?, ?, ?, ?, ?, ?)")
-    .bind(slug, data.name, data.landerId, data.offerId, data.trafficSourceId, "active").run();
+    await db.prepare("INSERT INTO campaigns (id, name, lander_id, offer_id, traffic_source_id, status) VALUES (?, ?, ?, ?, ?, ?)")
+      .bind(slug, data.name, data.landerId, data.offerId, data.trafficSourceId, "active").run();
 
-  if (lander && offer) {
-    await kv.put(slug, JSON.stringify({
-      lander_url: lander.url,
-      offer_url: offer.url,
-      params: ts?.params || "[]",
-      status: "active"
-    }));
+    if (lander && offer) {
+      await kv.put(slug, JSON.stringify({
+        lander_url: lander.url,
+        offer_url: offer.url,
+        params: ts?.params || "[]",
+        status: "active"
+      }));
+    }
+    return { success: true, slug };
+  } catch (e) {
+    console.error("Launch Error:", e);
+    return { success: false, error: "Database error" };
   }
-
-  return { success: true, slug };
 }
