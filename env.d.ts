@@ -1,31 +1,29 @@
 /**
  * CLOUDFLARE ENVIRONMENT BINDINGS
- * This file tells TypeScript about the resources you've bound to your project.
+ * This file augments the global scope to let TypeScript know about your Cloudflare resources.
  */
 
-interface CloudflareEnv {
-  // D1 Database for relational data
-  DB: D1Database;
-  
-  // KV Namespace for fast redirect lookups
-  CAMPAIGNS: KVNamespace;
-  
-  // Analytics Engine for tracking events
-  ANALYTICS?: {
-    writeDataPoint: (data: {
-      blobs?: string[];
-      doubles?: number[];
-      indexes?: string[];
-    }) => void;
-  };
+import "@cloudflare/next-on-pages";
 
-  // Secrets/Environment Variables
-  CLOUDFLARE_API_TOKEN?: string;
-  CLOUDFLARE_ACCOUNT_ID?: string;
-}
-
-// Ensure global scope for these types
 declare global {
+  interface CloudflareEnv {
+    // D1 Database for relational data
+    DB: D1Database;
+    
+    // KV Namespace for fast redirect lookups
+    CAMPAIGNS: KVNamespace;
+    
+    // Analytics Engine for tracking events
+    ANALYTICS?: {
+      writeDataPoint: (data: {
+        blobs?: string[];
+        doubles?: number[];
+        indexes?: string[];
+      }) => void;
+    };
+  }
+
+  // Define basic shapes for Cloudflare types if @cloudflare/workers-types is not installed
   interface D1Database {
     prepare: (query: string) => D1PreparedStatement;
   }
