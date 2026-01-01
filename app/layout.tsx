@@ -1,4 +1,5 @@
 import React from 'react';
+import './globals.css';
 
 /**
  * Note: In your local GitHub project, you can keep the 'globals.css' import 
