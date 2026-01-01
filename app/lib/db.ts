@@ -1,7 +1,6 @@
 /**
  * DATABASE UTILITIES (app/lib/db.ts)
- * Centralized logic for interacting with Cloudflare D1.
- * Includes safety fallbacks for local/preview environments.
+ * Centralized logic for interacting with Cloudflare D1 and KV.
  */
 
 export async function getDb() {
@@ -10,61 +9,79 @@ export async function getDb() {
     const { env } = getRequestContext();
     return env.DB;
   } catch (e) {
-    // In local dev or preview, we return a mock interface
-    // to prevent crashes while you build the UI.
+    // Mock for local dev
     return {
-      prepare: (query: string) => ({
-        bind: (...args: any[]) => ({
-          all: async () => ({ results: [], success: true }),
-          first: async () => null,
-          run: async () => ({ success: true })
-        }),
-        all: async () => ({ results: [], success: true }),
-        first: async () => null,
-        run: async () => ({ success: true })
-      })
+      prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), run: async () => ({ success: true }), first: async () => null }) })
     };
   }
 }
 
+export async function getKv() {
+  try {
+    const { getRequestContext } = await import('@cloudflare/next-on-pages');
+    const { env } = getRequestContext();
+    return env.CAMPAIGNS;
+  } catch (e) {
+    return { get: async () => null, put: async () => {}, delete: async () => {} };
+  }
+}
+
 /**
- * CAMPAIGN ACTIONS
+ * GENERIC CRUD HELPERS
  */
-export async function createCampaign(data: {
+export async function deleteRecord(table: string, id: string) {
+  const db = await getDb();
+  // If deleting a campaign, also remove from KV
+  if (table === 'campaigns') {
+    const kv = await getKv();
+    await kv.delete(id);
+  }
+  return await db.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(id).run();
+}
+
+/**
+ * LANDER / OFFER / SOURCE ACTIONS
+ */
+export async function addInfrastructure(table: string, data: any) {
+  const db = await getDb();
+  const id = crypto.randomUUID().split('-')[0];
+  if (table === 'traffic_sources') {
+    return await db.prepare("INSERT INTO traffic_sources (id, name, params) VALUES (?, ?, ?)")
+      .bind(id, data.name, data.params).run();
+  }
+  return await db.prepare(`INSERT INTO ${table} (id, name, url) VALUES (?, ?, ?)`)
+    .bind(id, data.name, data.url).run();
+}
+
+/**
+ * CAMPAIGN ACTIONS (D1 + KV Sync)
+ */
+export async function launchCampaign(data: {
   name: string;
   landerId: string;
   offerId: string;
   trafficSourceId: string;
 }) {
   const db = await getDb();
-  const slug = data.name
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "");
+  const kv = await getKv();
+  const slug = data.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
 
-  return await db
-    .prepare(
-      "INSERT INTO campaigns (id, name, lander_id, offer_id, traffic_source_id, status) VALUES (?, ?, ?, ?, ?, ?)"
-    )
-    .bind(slug, data.name, data.landerId, data.offerId, data.trafficSourceId, "active")
-    .run();
-}
+  // 1. Get routing info
+  const lander = await db.prepare("SELECT url FROM landers WHERE id = ?").bind(data.landerId).first();
+  const offer = await db.prepare("SELECT url FROM offers WHERE id = ?").bind(data.offerId).first();
+  const ts = await db.prepare("SELECT params FROM traffic_sources WHERE id = ?").bind(data.trafficSourceId).first();
 
-/**
- * INFRASTRUCTURE FETCHERS
- */
-export async function getInfrastructureData() {
-  const db = await getDb();
-  
-  const [landers, offers, sources] = await Promise.all([
-    db.prepare("SELECT * FROM landers ORDER BY id DESC").all(),
-    db.prepare("SELECT * FROM offers ORDER BY id DESC").all(),
-    db.prepare("SELECT * FROM traffic_sources ORDER BY id DESC").all(),
-  ]);
+  // 2. Save to D1
+  await db.prepare("INSERT INTO campaigns (id, name, lander_id, offer_id, traffic_source_id, status) VALUES (?, ?, ?, ?, ?, ?)")
+    .bind(slug, data.name, data.landerId, data.offerId, data.trafficSourceId, "active").run();
 
-  return {
-    landers: landers.results || [],
-    offers: offers.results || [],
-    sources: sources.results || []
-  };
+  // 3. Save to KV for fast edge redirects
+  await kv.put(slug, JSON.stringify({
+    lander_url: lander.url,
+    offer_url: offer.url,
+    params: ts?.params || "",
+    status: "active"
+  }));
+
+  return { success: true, slug };
 }
