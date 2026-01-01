@@ -3,8 +3,9 @@ import { getDb } from '@/app/lib/db';
 
 export const runtime = 'edge';
 
-export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const { id } = params;
+export async function GET(req: NextRequest, context: { params: { id: string } }) {
+
+  const { id } = context.params;
 
   try {
     const db = await getDb();
