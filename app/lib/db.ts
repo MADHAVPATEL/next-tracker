@@ -1,6 +1,5 @@
 /**
- * DATABASE UTILITIES (app/lib/db.ts)
- * Centralized logic for interacting with Cloudflare D1 and KV.
+ * DATABASE & ANALYTICS UTILITIES (app/lib/db.ts)
  */
 
 export async function getDb() {
@@ -34,6 +33,49 @@ export async function getKv() {
   }
 }
 
+/**
+ * FETCH REAL-TIME STATS FROM ANALYTICS ENGINE
+ */
+export async function getCampaignStats() {
+  try {
+    const { getRequestContext } = await import('@cloudflare/next-on-pages');
+    const { env } = getRequestContext() as { env: CloudflareEnv };
+
+    if (!env.CLOUDFLARE_API_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) {
+      return {};
+    }
+
+    const query = `
+      SELECT blob1 as cmp, blob2 as type, SUM(_sample_interval * double1) as val
+      FROM ClickLogs 
+      WHERE timestamp > NOW() - INTERVAL '1' DAY 
+      GROUP BY cmp, type`;
+
+    const res = await fetch(
+      `https://api.cloudflare.com/client/v4/accounts/${env.CLOUDFLARE_ACCOUNT_ID}/analytics_engine/sql`,
+      {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${env.CLOUDFLARE_API_TOKEN}` },
+        body: query
+      }
+    );
+
+    const json = await res.json() as any;
+    if (!res.ok) return {};
+
+    const stats: Record<string, { visits: number; clicks: number; revenue: number }> = {};
+    for (const row of json.data) {
+      if (!stats[row.cmp]) stats[row.cmp] = { visits: 0, clicks: 0, revenue: 0 };
+      if (row.type === "visit") stats[row.cmp].visits += row.val;
+      if (row.type === "lander_click") stats[row.cmp].clicks += row.val;
+      if (row.type === "conversion") stats[row.cmp].revenue += row.val;
+    }
+    return stats;
+  } catch (e) {
+    return {};
+  }
+}
+
 export async function getInfrastructureData() {
   const db = await getDb();
   const [landers, offers, sources] = await Promise.all([
@@ -47,11 +89,8 @@ export async function getInfrastructureData() {
     offers: offers.results || [],
     sources: (sources.results || []).map((s: any) => {
       let parsed = [];
-      try {
-        parsed = typeof s.params === 'string' ? JSON.parse(s.params) : (s.params || []);
-      } catch (e) {
-        parsed = [];
-      }
+      try { parsed = typeof s.params === 'string' ? JSON.parse(s.params) : (s.params || []); } 
+      catch (e) { parsed = []; }
       return { ...s, params: parsed };
     })
   };
@@ -59,35 +98,20 @@ export async function getInfrastructureData() {
 
 export async function deleteRecord(table: string, id: string) {
   const db = await getDb();
-  
-  // 1. Check for dependencies (Don't delete if used by a campaign)
-  if (table !== 'campaigns') {
-    const idColumn = table === 'landers' ? 'lander_id' : table === 'offers' ? 'offer_id' : 'traffic_source_id';
-    const check = await db.prepare(`SELECT id FROM campaigns WHERE ${idColumn} = ? LIMIT 1`).bind(id).first();
-    if (check) {
-      throw new Error(`Cannot delete: This ${table.slice(0, -1)} is still used by a campaign.`);
-    }
-  }
-
-  // 2. Clear KV if it's a campaign
   if (table === 'campaigns') {
     const kv = await getKv();
     await kv.delete(id);
   }
-
-  // 3. Delete from D1
   return await db.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(id).run();
 }
 
 export async function addInfrastructure(table: string, data: any) {
   const db = await getDb();
   const id = crypto.randomUUID().split('-')[0];
-  
   if (table === 'traffic_sources') {
     return await db.prepare("INSERT INTO traffic_sources (id, name, params) VALUES (?, ?, ?)")
       .bind(id, data.name, JSON.stringify(data.params || [])).run();
   }
-  
   return await db.prepare(`INSERT INTO ${table} (id, name, url) VALUES (?, ?, ?)`)
     .bind(id, data.name, data.url).run();
 }
