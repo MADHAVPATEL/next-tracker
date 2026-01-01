@@ -46,23 +46,36 @@ export async function getInfrastructureData() {
     landers: landers.results || [],
     offers: offers.results || [],
     sources: (sources.results || []).map((s: any) => {
-      let parsedParams = [];
+      let parsed = [];
       try {
-        parsedParams = typeof s.params === 'string' ? JSON.parse(s.params) : (s.params || []);
+        parsed = typeof s.params === 'string' ? JSON.parse(s.params) : (s.params || []);
       } catch (e) {
-        parsedParams = [];
+        parsed = [];
       }
-      return { ...s, params: parsedParams };
+      return { ...s, params: parsed };
     })
   };
 }
 
 export async function deleteRecord(table: string, id: string) {
   const db = await getDb();
+  
+  // 1. Check for dependencies (Don't delete if used by a campaign)
+  if (table !== 'campaigns') {
+    const idColumn = table === 'landers' ? 'lander_id' : table === 'offers' ? 'offer_id' : 'traffic_source_id';
+    const check = await db.prepare(`SELECT id FROM campaigns WHERE ${idColumn} = ? LIMIT 1`).bind(id).first();
+    if (check) {
+      throw new Error(`Cannot delete: This ${table.slice(0, -1)} is still used by a campaign.`);
+    }
+  }
+
+  // 2. Clear KV if it's a campaign
   if (table === 'campaigns') {
     const kv = await getKv();
     await kv.delete(id);
   }
+
+  // 3. Delete from D1
   return await db.prepare(`DELETE FROM ${table} WHERE id = ?`).bind(id).run();
 }
 
@@ -71,9 +84,8 @@ export async function addInfrastructure(table: string, data: any) {
   const id = crypto.randomUUID().split('-')[0];
   
   if (table === 'traffic_sources') {
-    const paramsJson = JSON.stringify(data.params || []);
     return await db.prepare("INSERT INTO traffic_sources (id, name, params) VALUES (?, ?, ?)")
-      .bind(id, data.name, paramsJson).run();
+      .bind(id, data.name, JSON.stringify(data.params || [])).run();
   }
   
   return await db.prepare(`INSERT INTO ${table} (id, name, url) VALUES (?, ?, ?)`)
@@ -83,9 +95,8 @@ export async function addInfrastructure(table: string, data: any) {
 export async function updateInfrastructure(table: string, id: string, data: any) {
   const db = await getDb();
   if (table === 'traffic_sources') {
-    const paramsJson = JSON.stringify(data.params || []);
     return await db.prepare(`UPDATE traffic_sources SET name = ?, params = ? WHERE id = ?`)
-      .bind(data.name, paramsJson, id).run();
+      .bind(data.name, JSON.stringify(data.params || []), id).run();
   }
   return await db.prepare(`UPDATE ${table} SET name = ?, url = ? WHERE id = ?`)
     .bind(data.name, data.url, id).run();
