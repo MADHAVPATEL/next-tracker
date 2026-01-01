@@ -8,6 +8,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: 'Campaigns', href: '/dashboard/campaigns', icon: Zap },
     { name: 'Traffic Sources', href: '/dashboard/sources', icon: Globe },
     { name: 'Analytics', href: '/dashboard/analytics', icon: BarChart3 },
+    { name: 'Reports', href: '/dashboard/reports', icon: BarChart3 },
   ];
 
   return (
