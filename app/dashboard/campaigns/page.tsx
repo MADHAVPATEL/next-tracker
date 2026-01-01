@@ -1,142 +1,142 @@
 import React from 'react';
-import { Zap, Plus, ExternalLink, Copy, TrendingUp, BarChart3 } from 'lucide-react';
+import { Zap, Plus, Copy, Trash2, Rocket, Edit3, X, Save } from 'lucide-react';
+import { getDb, launchCampaign, deleteRecord, getInfrastructureData } from '../../lib/db';
+import { revalidatePath } from 'next/cache';
 
 export const runtime = 'edge';
 
-/**
- * Note: getRequestContext is only available in the actual Cloudflare Pages environment.
- * For this preview, we handle the potential resolution error.
- */
-async function getCampaignData() {
-  try {
-    // We dynamically require to avoid build-time errors in environments 
-    // without the cloudflare context provided.
-    const { getRequestContext } = await import('@cloudflare/next-on-pages');
-    const { env } = getRequestContext();
-    const db = env.DB;
-
-    const { results: campaigns } = await db.prepare(`
-      SELECT c.*, l.name AS lander_name, o.name AS offer_name, ts.name as ts_name, ts.params as ts_params
-      FROM campaigns c
-      LEFT JOIN landers l ON c.lander_id = l.id
-      LEFT JOIN offers o ON c.offer_id = o.id
-      LEFT JOIN traffic_sources ts ON c.traffic_source_id = ts.id
-      ORDER BY c.id DESC
-    `).all();
-
-    return campaigns.map((c: any) => ({
-      ...c,
-      stats: { visits: 1200, clicks: 450, revenue: 154.20 } // Real logic would go here
-    }));
-  } catch (e) {
-    // Fallback/Mock data for the preview environment
-    return [
-      {
-        id: 'cmp-alpha',
-        name: 'Summer Sale 2024',
-        ts_name: 'Google Ads',
-        lander_name: 'Main Lander v2',
-        offer_name: 'Premium Subscription',
-        stats: { visits: 24502, clicks: 890, revenue: 1240.55 }
-      },
-      {
-        id: 'cmp-beta',
-        name: 'FB Retargeting',
-        ts_name: 'Facebook',
-        lander_name: 'Discount LP',
-        offer_name: 'Ebook Bundle',
-        stats: { visits: 1240, clicks: 310, revenue: 450.00 }
-      }
-    ];
-  }
+interface Props {
+  searchParams: Promise<{ editId?: string }>;
 }
 
-export default async function CampaignsPage() {
-  const campaigns = await getCampaignData();
+export default async function CampaignsPage({ searchParams }: Props) {
+  const params = await searchParams;
+  const editId = params.editId;
+
+  const db = await getDb();
+  const { results: campaigns } = await db.prepare(`
+    SELECT c.*, l.name AS lander_name, o.name AS offer_name, ts.name as ts_name
+    FROM campaigns c
+    LEFT JOIN landers l ON c.lander_id = l.id
+    LEFT JOIN offers o ON c.offer_id = o.id
+    LEFT JOIN traffic_sources ts ON c.traffic_source_id = ts.id
+    ORDER BY c.id DESC
+  `).all();
+
+  const { landers, offers, sources } = await getInfrastructureData();
+  const editingCampaign = editId ? campaigns.find((c: any) => c.id === editId) : null;
+
+  async function handleSave(formData: FormData) {
+    'use server';
+    const id = formData.get('id') as string;
+    const name = formData.get('name') as string;
+    const landerId = formData.get('lander_id') as string;
+    const offerId = formData.get('offer_id') as string;
+    const trafficSourceId = formData.get('traffic_source_id') as string;
+
+    if (id) {
+      const db = await getDb();
+      await db.prepare("UPDATE campaigns SET name = ?, lander_id = ?, offer_id = ?, traffic_source_id = ? WHERE id = ?")
+        .bind(name, landerId, offerId, trafficSourceId, id)
+        .run();
+      // Note: In production, you'd also want to refresh the KV redirect mapping here
+    } else {
+      await launchCampaign({ name, landerId, offerId, trafficSourceId });
+    }
+    revalidatePath('/dashboard/campaigns');
+  }
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-3xl font-black tracking-tight text-slate-900">Campaigns</h2>
-          <p className="text-slate-500 font-medium italic">Track your traffic flow and conversion engine.</p>
-        </div>
-        <button className="bg-indigo-600 text-white px-8 py-4 rounded-[1.5rem] text-sm font-black uppercase tracking-widest flex items-center gap-2 hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200">
-          <Plus size={18} /> New Campaign
-        </button>
+    <div className="space-y-10 animate-in fade-in duration-500 pb-20">
+      <div>
+        <h2 className="text-3xl font-black tracking-tight text-slate-900">Campaigns</h2>
+        <p className="text-slate-500 font-medium">Launch and manage your tracking engines.</p>
       </div>
 
-      {/* Campaign List */}
-      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50/50 text-[10px] uppercase font-black text-slate-400 tracking-widest border-b border-slate-100">
-                <th className="px-8 py-6">Campaign Info</th>
-                <th className="px-8 py-6">Tracking Path</th>
-                <th className="px-8 py-6">Real-time Metrics</th>
-                <th className="px-8 py-6 text-right">Mapping</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-50">
-              {campaigns.map((c: any) => {
-                const cr = c.stats.visits > 0 ? ((c.stats.clicks / c.stats.visits) * 100).toFixed(1) : '0';
-                return (
-                  <tr key={c.id} className="hover:bg-slate-50/40 transition-colors group">
-                    <td className="px-8 py-6">
-                      <div className="font-black text-slate-800 text-lg tracking-tight">{c.name}</div>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
-                        <span className="text-[10px] text-indigo-500 font-black uppercase tracking-tighter bg-indigo-50 px-2 py-0.5 rounded-md">
-                          {c.ts_name}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6">
-                      <div className="flex items-center gap-2 group/link">
-                        <code className="bg-slate-50 text-[11px] px-3 py-1.5 rounded-xl border border-slate-200 text-slate-500 font-mono">
-                          /{c.id}
-                        </code>
-                        <button className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-white rounded-xl transition-all border border-transparent hover:border-slate-100 shadow-none hover:shadow-sm">
-                          <Copy size={16} />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6">
-                      <div className="flex items-center gap-8">
-                        <div>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Visits</p>
-                          <p className="text-xl font-black text-slate-800">{c.stats.visits.toLocaleString()}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">CTR</p>
-                          <p className="text-xl font-black text-indigo-600">{cr}%</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Revenue</p>
-                          <p className="text-xl font-black text-emerald-500">${c.stats.revenue.toLocaleString()}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-8 py-6 text-right">
-                      <div className="inline-flex flex-col items-end">
-                        <div className="flex items-center gap-2 text-[11px] font-bold text-slate-500">
-                          <span className="bg-slate-100 px-2 py-1 rounded-lg">{c.lander_name}</span>
-                          <TrendingUp size={12} className="text-slate-300" />
-                          <span className="bg-indigo-50 text-indigo-600 px-2 py-1 rounded-lg">{c.offer_name}</span>
-                        </div>
-                        <button className="mt-3 text-[10px] font-black uppercase tracking-widest text-slate-300 hover:text-indigo-600 flex items-center gap-1 transition-colors">
-                          View Details <ExternalLink size={12} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+      <section className={`p-8 rounded-[2.5rem] border transition-all duration-500 relative overflow-hidden ${editingCampaign ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-100 shadow-sm'}`}>
+        {!editingCampaign && (
+          <div className="absolute top-0 right-0 p-8 text-indigo-50/50 -rotate-12 translate-x-4 -translate-y-4">
+            <Rocket size={120} />
+          </div>
+        )}
+        
+        <div className="flex justify-between items-center mb-6 relative z-10">
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-400">
+            {editingCampaign ? `Editing Campaign: ${editingCampaign.name}` : 'Launch New Campaign'}
+          </h3>
+          {editingCampaign && (
+            <a href="/dashboard/campaigns" className="text-[10px] font-black uppercase tracking-widest text-indigo-400 hover:text-indigo-600 flex items-center gap-1">
+              <X size={12} /> Cancel Edit
+            </a>
+          )}
         </div>
+
+        <form action={handleSave} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 relative z-10">
+          <input type="hidden" name="id" value={editingCampaign?.id || ''} />
+          <input 
+            name="name" 
+            placeholder="Campaign Name" 
+            required 
+            defaultValue={editingCampaign?.name || ''}
+            className="lg:col-span-2 p-3 bg-white border border-slate-200 rounded-2xl text-sm font-medium" 
+          />
+          <select name="lander_id" required defaultValue={editingCampaign?.lander_id || ""} className="p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold">
+            <option disabled value="">Select Lander</option>
+            {landers.map((l: any) => <option key={l.id} value={l.id}>{l.name}</option>)}
+          </select>
+          <select name="offer_id" required defaultValue={editingCampaign?.offer_id || ""} className="p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold">
+            <option disabled value="">Select Offer</option>
+            {offers.map((o: any) => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+          <select name="traffic_source_id" required defaultValue={editingCampaign?.traffic_source_id || ""} className="p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold">
+            <option disabled value="">Traffic Source</option>
+            {sources.map((ts: any) => <option key={ts.id} value={ts.id}>{ts.name}</option>)}
+          </select>
+          <button className={`lg:col-span-5 ${editingCampaign ? 'bg-indigo-600' : 'bg-slate-900'} text-white font-black py-4 rounded-2xl uppercase text-xs tracking-widest shadow-xl transition-all flex items-center justify-center gap-2`}>
+            {editingCampaign ? <Save size={16} /> : null}
+            {editingCampaign ? 'Update Tracking Engine' : 'Deploy Tracking Link'}
+          </button>
+        </form>
+      </section>
+
+      <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
+        <table className="w-full text-left">
+          <thead className="bg-slate-50/50 text-[10px] uppercase font-black text-slate-400 tracking-widest">
+            <tr className="border-b border-slate-100">
+              <th className="px-8 py-5">Name & Source</th>
+              <th className="px-8 py-5">Slug</th>
+              <th className="px-8 py-5">Route</th>
+              <th className="px-8 py-5 text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-50">
+            {campaigns.map((c: any) => (
+              <tr key={c.id} className={`hover:bg-slate-50/40 transition-colors group ${editId === c.id ? 'bg-indigo-50/30' : ''}`}>
+                <td className="px-8 py-5">
+                  <div className="font-bold text-slate-800">{c.name}</div>
+                  <div className="text-[10px] text-indigo-500 font-black uppercase mt-0.5">{c.ts_name}</div>
+                </td>
+                <td className="px-8 py-5">
+                  <div className="flex items-center gap-2">
+                    <code className="bg-slate-100 text-[10px] px-2 py-1 rounded border">/{c.id}</code>
+                    <button className="p-1 text-slate-300 hover:text-indigo-600"><Copy size={14} /></button>
+                  </div>
+                </td>
+                <td className="px-8 py-5">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter truncate max-w-[150px]">
+                        {c.lander_name} → {c.offer_name}
+                    </p>
+                </td>
+                <td className="px-8 py-5 text-right flex items-center justify-end gap-1">
+                  <a href={`?editId=${c.id}`} className="p-2 text-slate-200 hover:text-indigo-500 transition-colors"><Edit3 size={18} /></a>
+                  <form action={async () => { 'use server'; await deleteRecord('campaigns', c.id); revalidatePath('/dashboard/campaigns'); }}>
+                    <button className="p-2 text-slate-200 hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                  </form>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );
