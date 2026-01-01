@@ -41,6 +41,7 @@ export async function getCampaignStats() {
     const { getRequestContext } = await import('@cloudflare/next-on-pages');
     const { env } = getRequestContext() as { env: CloudflareEnv };
 
+    // These must be defined in your Cloudflare Pages dashboard environment variables
     if (!env.CLOUDFLARE_API_TOKEN || !env.CLOUDFLARE_ACCOUNT_ID) {
       return {};
     }
