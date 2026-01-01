@@ -5,14 +5,14 @@ import {
   CheckCircle2, AlertCircle 
 } from 'lucide-react';
 
-// Using relative path to match your project structure and avoid resolution issues
+// Using the project's defined path alias for reliable resolution
 import { 
   getDb, 
   launchCampaign, 
   deleteRecord, 
   getInfrastructureData, 
   getCampaignStats 
-} from '../../lib/db';
+} from '@/app/lib/db';
 
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
@@ -24,7 +24,7 @@ interface Props {
 }
 
 /**
- * HELPER: Safe JSON Parsing to prevent page crashes on malformed DB data
+ * HELPER: Safe JSON Parsing
  */
 function safeParse(str: string | null | undefined, fallback: any = []) {
   if (!str || typeof str !== 'string') return fallback;
@@ -36,7 +36,7 @@ function safeParse(str: string | null | undefined, fallback: any = []) {
 }
 
 export default async function CampaignsPage({ searchParams }: Props) {
-  // 1. Await Next.js 15 Async APIs safely
+  // Await searchParams for Next.js 15
   const params = await (searchParams || Promise.resolve({}));
   const editId = params.editId;
   
@@ -44,7 +44,6 @@ export default async function CampaignsPage({ searchParams }: Props) {
   let origin = '';
   
   try {
-      // In some preview/build environments headers() might fail, so we wrap it
       const headersList = await headers();
       host = headersList.get('host') || 'your-domain.com';
       const protocol = host.includes('localhost') ? 'http' : 'https';
@@ -53,16 +52,20 @@ export default async function CampaignsPage({ searchParams }: Props) {
       origin = ''; 
   }
 
+  // Explicitly typing state variables to prevent 'never[]' inference errors
   let campaigns: any[] = [];
-  let infrastructure = { landers: [], offers: [], sources: [] };
-  let stats: any = {};
-  let dbError = null;
+  let infrastructure: { landers: any[]; offers: any[]; sources: any[] } = { 
+    landers: [], 
+    offers: [], 
+    sources: [] 
+  };
+  let stats: Record<string, { visits: number; clicks: number; revenue: number }> = {};
+  let dbError: string | null = null;
 
   try {
     const db = await getDb();
     
-    // 2. Fetch campaigns with explicit join and column alias for TS params
-    // We check if db is valid before preparing
+    // Fetch campaigns with full relational data if DB is available
     if (db && typeof db.prepare === 'function') {
         const queryResult = await db.prepare(`
           SELECT 
@@ -84,11 +87,12 @@ export default async function CampaignsPage({ searchParams }: Props) {
         }));
     }
 
-    // 3. Fetch dependent data
+    // Parallel fetch for infrastructure and real-time stats
     const [infraRes, statsRes] = await Promise.all([
         getInfrastructureData(),
         getCampaignStats()
     ]);
+    
     infrastructure = infraRes;
     stats = statsRes;
 
@@ -101,7 +105,7 @@ export default async function CampaignsPage({ searchParams }: Props) {
   const editingCampaign = editId ? campaigns.find((c: any) => c.id === editId) : null;
 
   /**
-   * SERVER ACTION: Save or Update Campaign
+   * SERVER ACTION: Save or Update Campaign configuration
    */
   async function handleSave(formData: FormData) {
     'use server';
@@ -139,7 +143,7 @@ export default async function CampaignsPage({ searchParams }: Props) {
           <div className="bg-amber-200 p-2 rounded-xl"><AlertCircle size={24} /></div>
           <div>
             <p className="font-black text-sm uppercase tracking-wider">Edge Connection Notice</p>
-            <p className="text-xs font-medium opacity-80">The tracking database is currently unavailable or initializing. Details: {dbError}</p>
+            <p className="text-xs font-medium opacity-80">Database initialization in progress or binding unavailable. Details: {dbError}</p>
           </div>
         </div>
       )}
