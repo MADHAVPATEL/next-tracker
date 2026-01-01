@@ -2,8 +2,7 @@ export const runtime = 'edge';
 
 /**
  * DYNAMIC CAMPAIGN TRACKER (/[slug])
- * This acts as the entry point for all tracking links.
- * It uses Cloudflare KV for sub-10ms lookups.
+ * Updated to handle structured JSON parameters for better analytics.
  */
 export async function GET(
   request: Request,
@@ -16,10 +15,8 @@ export async function GET(
     const { getRequestContext } = await import('@cloudflare/next-on-pages');
     const { env } = getRequestContext() as { env: CloudflareEnv };
 
-    // 1. Edge-cached lookup in KV
     const campaignData = await env.CAMPAIGNS.get(slug);
     
-    // If no campaign found in KV, return 404
     if (!campaignData) {
       return new Response("Campaign Not Found", { status: 404 });
     }
@@ -27,41 +24,47 @@ export async function GET(
     const campaign = JSON.parse(campaignData);
     const clickId = crypto.randomUUID();
 
-    // 2. Capture Traffic Source Params from URL
-    const paramKeys = (campaign.params || "").split(",").map((k: string) => k.trim());
-    const paramValues = paramKeys.map((k: string) => url.searchParams.get(k) || "none");
+    // 1. Parse Structured JSON Parameters
+    // Each param looks like: { key: "s1", value: "{clickid}", name: "Sub 1" }
+    let paramConfig = [];
+    try {
+        paramConfig = typeof campaign.params === 'string' ? JSON.parse(campaign.params) : (campaign.params || []);
+    } catch (e) {
+        paramConfig = [];
+    }
 
-    // 3. Log Visit to Analytics Engine (Non-blocking)
+    // Map incoming URL values based on the config keys
+    // We capture up to the first 3 for basic Analytics Engine blobs
+    const capturedValues = paramConfig.slice(0, 3).map((p: any) => url.searchParams.get(p.key) || "none");
+
+    // 2. Log Visit to Analytics Engine (Non-blocking)
     if (env.ANALYTICS) {
       env.ANALYTICS.writeDataPoint({
         blobs: [
           slug, 
           "visit", 
           clickId, 
-          // @ts-ignore - cf object is added by Cloudflare runtime
+          // @ts-ignore
           request.cf?.country || "XX",
-          paramValues[0] || "",
-          paramValues[1] || "",
-          paramValues[2] || ""
+          capturedValues[0] || "",
+          capturedValues[1] || "",
+          capturedValues[2] || ""
         ],
         doubles: [1],
         indexes: [slug]
       });
     }
 
-    // 4. Construct Destination URL (Lander)
+    // 3. Construct Destination URL (Lander)
     const dest = new URL(campaign.lander_url);
-    
-    // Pass CID and CMP to the lander for the /click transition
     dest.searchParams.set("cid", clickId);
     dest.searchParams.set("cmp", slug);
     
-    // Forward any other original URL parameters (e.g. gclid, adid)
+    // Forward all original parameters to the destination lander
     url.searchParams.forEach((val, key) => {
       dest.searchParams.set(key, val);
     });
 
-    // 5. Fire the redirect
     return Response.redirect(dest.toString(), 302);
     
   } catch (err) {
