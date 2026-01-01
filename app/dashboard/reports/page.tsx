@@ -43,7 +43,8 @@ export default function DrillDownReportPage() {
           try {
             const res = await fetch(`/api/traffic-sources/${campaign.traffic_source_id}`);
             const data = await res.json();
-            setAvailableParams(data || []);
+            const paramKeys = (data || []).map((p: any) => p.key);
+            setAvailableParams(paramKeys);
           } catch (error) {
             console.error("Failed to fetch params", error);
             setAvailableParams([]);
