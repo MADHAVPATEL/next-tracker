@@ -21,6 +21,10 @@ declare global {
         indexes?: string[];
       }) => void;
     };
+
+    // Cloudflare Credentials for Analytics SQL API
+    CLOUDFLARE_API_TOKEN?: string;
+    CLOUDFLARE_ACCOUNT_ID?: string;
   }
 
   // Define basic shapes for Cloudflare types if @cloudflare/workers-types is not installed
