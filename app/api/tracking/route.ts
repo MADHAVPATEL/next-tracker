@@ -1,13 +1,11 @@
-import { NextRequest, NextResponse } from 'next/server';
-
 export const runtime = 'edge';
 
 /**
  * Ported Tracking Engine
  * Handles: Visit capturing, redirecting to Lander, and Click ID generation.
- * Uses dynamic imports to prevent build-time resolution errors.
+ * This version uses standard Web API Response/Request for better Edge compatibility.
  */
-export async function GET(request: NextRequest) {
+export async function GET(request: Request) {
   const url = new URL(request.url);
   const searchParams = url.searchParams;
   
@@ -19,10 +17,10 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Dynamic import to handle environments without @cloudflare/next-on-pages
     const { getRequestContext } = await import('@cloudflare/next-on-pages');
-    const { env } = getRequestContext();
+    const { env } = getRequestContext() as { env: CloudflareEnv };
 
+    // CAMPAIGNS is your KV Namespace
     const campaignData = await env.CAMPAIGNS.get(slug);
     
     if (!campaignData) {
@@ -43,7 +41,8 @@ export async function GET(request: NextRequest) {
           slug, 
           "visit", 
           clickId, 
-          request.geo?.country || "XX",
+          // @ts-ignore - geo properties provided by Cloudflare
+          request.cf?.country || "XX",
           paramValues[0] || "",
           paramValues[1] || "",
           paramValues[2] || ""
@@ -58,11 +57,9 @@ export async function GET(request: NextRequest) {
     dest.searchParams.set("cid", clickId);
     dest.searchParams.set("cmp", slug);
 
-    return NextResponse.redirect(dest.toString(), 302);
+    return Response.redirect(dest.toString(), 302);
   } catch (err) {
-    // In preview or local environments where KV/D1 aren't bound, 
-    // we log the error and return a fallback message.
     console.error("Tracking Error:", err);
-    return new Response(`Tracking Engine active (Fallback mode). Target: ${slug}`, { status: 200 });
+    return new Response(`Tracking Engine active. Target: ${slug}`, { status: 200 });
   }
 }
