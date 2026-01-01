@@ -45,11 +45,15 @@ export async function getInfrastructureData() {
   return {
     landers: landers.results || [],
     offers: offers.results || [],
-    // Parse JSON params for sources
-    sources: (sources.results || []).map((s: any) => ({
-      ...s,
-      params: typeof s.params === 'string' ? JSON.parse(s.params) : s.params
-    }))
+    sources: (sources.results || []).map((s: any) => {
+      let parsedParams = [];
+      try {
+        parsedParams = typeof s.params === 'string' ? JSON.parse(s.params) : (s.params || []);
+      } catch (e) {
+        parsedParams = [];
+      }
+      return { ...s, params: parsedParams };
+    })
   };
 }
 
@@ -67,8 +71,7 @@ export async function addInfrastructure(table: string, data: any) {
   const id = crypto.randomUUID().split('-')[0];
   
   if (table === 'traffic_sources') {
-    // Data.params is an array of objects, we stringify for storage
-    const paramsJson = JSON.stringify(data.params);
+    const paramsJson = JSON.stringify(data.params || []);
     return await db.prepare("INSERT INTO traffic_sources (id, name, params) VALUES (?, ?, ?)")
       .bind(id, data.name, paramsJson).run();
   }
@@ -80,7 +83,7 @@ export async function addInfrastructure(table: string, data: any) {
 export async function updateInfrastructure(table: string, id: string, data: any) {
   const db = await getDb();
   if (table === 'traffic_sources') {
-    const paramsJson = JSON.stringify(data.params);
+    const paramsJson = JSON.stringify(data.params || []);
     return await db.prepare(`UPDATE traffic_sources SET name = ?, params = ? WHERE id = ?`)
       .bind(data.name, paramsJson, id).run();
   }
@@ -109,7 +112,6 @@ export async function launchCampaign(data: {
     await kv.put(slug, JSON.stringify({
       lander_url: lander.url,
       offer_url: offer.url,
-      // Store the structured params JSON directly in KV for the redirect engine
       params: ts?.params || "[]",
       status: "active"
     }));
