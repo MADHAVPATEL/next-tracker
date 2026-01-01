@@ -1,160 +1,174 @@
 import React from 'react';
-import { Globe, Plus, Link as LinkIcon, Layers, Settings2, Trash2, Edit3 } from 'lucide-react';
+import { Globe, Plus, Link as LinkIcon, Layers, Trash2, Zap, Edit3, X, Save } from 'lucide-react';
+// Use relative paths to ensure resolution in the preview environment
+import { getInfrastructureData, addInfrastructure, deleteRecord, getDb } from '../../lib/db';
+import { revalidatePath } from 'next/cache';
 
 export const runtime = 'edge';
 
-/**
- * Note: getRequestContext is only available in the actual Cloudflare Pages environment.
- * We use dynamic importing and a fallback mechanism to ensure the UI renders in this preview.
- */
-async function getInfrastructure() {
-  try {
-    const { getRequestContext } = await import('@cloudflare/next-on-pages');
-    const { env } = getRequestContext();
-    const db = env.DB;
-
-    const [landers, offers, sources] = await Promise.all([
-      db.prepare("SELECT * FROM landers ORDER BY id DESC").all(),
-      db.prepare("SELECT * FROM offers ORDER BY id DESC").all(),
-      db.prepare("SELECT * FROM traffic_sources ORDER BY id DESC").all(),
-    ]);
-
-    return { 
-      landers: landers.results || [], 
-      offers: offers.results || [], 
-      sources: sources.results || [] 
-    };
-  } catch (e) {
-    // Fallback Mock Data for Preview Environment
-    return {
-      landers: [
-        { id: 'l1', name: 'Main Lander v1', url: 'https://lander.pulse-saas.com/v1' },
-        { id: 'l2', name: 'Quiz Page Alpha', url: 'https://lander.pulse-saas.com/quiz' }
-      ],
-      offers: [
-        { id: 'o1', name: 'Health Supplement', url: 'https://network.com/offer/123' },
-        { id: 'o2', name: 'Crypto Course', url: 'https://network.com/offer/456' }
-      ],
-      sources: [
-        { id: 's1', name: 'Google Search', params: 'gclid,keyword,matchtype' },
-        { id: 's2', name: 'FB Pixel', params: 'fbclid,adid,campaign_id' }
-      ]
-    };
-  }
+interface Props {
+  searchParams: Promise<{ editId?: string; type?: string }>;
 }
 
-export default async function SourcesPage() {
-  const { landers, offers, sources } = await getInfrastructure();
+export default async function SourcesPage({ searchParams }: Props) {
+  const { landers, offers, sources } = await getInfrastructureData();
+  const params = await searchParams;
+  const editId = params.editId;
+  const editType = params.type;
+
+  // Server Action for adding/updating items
+  async function handleSave(formData: FormData) {
+    'use server';
+    const id = formData.get('id') as string;
+    const type = formData.get('type') as string;
+    const name = formData.get('name') as string;
+    const value = formData.get('value') as string;
+
+    const db = await getDb();
+    const valueColumn = type === 'traffic_sources' ? 'params' : 'url';
+
+    if (id) {
+      // Update existing
+      await db.prepare(`UPDATE ${type} SET name = ?, ${valueColumn} = ? WHERE id = ?`)
+        .bind(name, value, id)
+        .run();
+    } else {
+      // Create new
+      await addInfrastructure(type, { name, [valueColumn]: value });
+    }
+    
+    revalidatePath('/dashboard/sources');
+  }
+
+  // Find the item being edited
+  const allItems = [...landers, ...offers, ...sources];
+  const editingItem = editId ? allItems.find(item => item.id === editId) : null;
 
   return (
-    <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+    <div className="space-y-10 animate-in fade-in duration-700 pb-20">
+      <div className="flex justify-between items-end">
         <div>
           <h2 className="text-3xl font-black tracking-tight text-slate-900">Infrastructure</h2>
-          <p className="text-slate-500 font-medium">Manage your traffic sources, landers, and offer destinations.</p>
-        </div>
-        <div className="flex items-center gap-3">
-            <button className="bg-white border border-slate-200 text-slate-600 px-5 py-2.5 rounded-xl text-xs font-bold hover:bg-slate-50 transition-colors flex items-center gap-2">
-                <Settings2 size={14} /> Global Params
-            </button>
+          <p className="text-slate-500 font-medium">Manage your tracking assets and traffic parameters.</p>
         </div>
       </div>
 
+      {/* SAVE / EDIT FORM */}
+      <section className={`p-8 rounded-[2.5rem] border transition-all duration-500 ${editingItem ? 'bg-indigo-50 border-indigo-200 ring-4 ring-indigo-500/5' : 'bg-white border-slate-100 shadow-sm'}`}>
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+            {editingItem ? <Edit3 size={14} className="text-indigo-600" /> : <Plus size={14} />} 
+            {editingItem ? `Editing Asset: ${editingItem.name}` : 'Quick Add Asset'}
+          </h3>
+          {editingItem && (
+            <a href="/dashboard/sources" className="text-[10px] font-black uppercase tracking-widest text-indigo-400 hover:text-indigo-600 flex items-center gap-1">
+              <X size={12} /> Cancel Edit
+            </a>
+          )}
+        </div>
+        
+        <form action={handleSave} className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <input type="hidden" name="id" value={editingItem?.id || ''} />
+          <select 
+            name="type" 
+            required 
+            defaultValue={editType || 'landers'}
+            className="p-3 bg-white border border-slate-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 ring-indigo-500/20 disabled:opacity-50"
+            disabled={!!editingItem}
+          >
+            {editingItem && <input type="hidden" name="type" value={editType} />}
+            <option value="landers">Lander</option>
+            <option value="offers">Offer</option>
+            <option value="traffic_sources">Traffic Source</option>
+          </select>
+          <input 
+            name="name" 
+            placeholder="Display Name" 
+            required 
+            defaultValue={editingItem?.name || ''}
+            className="p-3 bg-white border border-slate-200 rounded-2xl text-sm font-medium" 
+          />
+          <input 
+            name="value" 
+            placeholder={editType === 'traffic_sources' ? "CSV Params (gclid,adid)" : "https://..."} 
+            required 
+            defaultValue={editingItem?.url || editingItem?.params || ''}
+            className="p-3 bg-white border border-slate-200 rounded-2xl text-sm font-medium" 
+          />
+          <button type="submit" className={`${editingItem ? 'bg-indigo-600' : 'bg-slate-900'} text-white font-black rounded-2xl text-xs uppercase tracking-widest hover:opacity-90 transition-all flex items-center justify-center gap-2`}>
+            {editingItem ? <Save size={14} /> : null}
+            {editingItem ? 'Update Asset' : 'Save Asset'}
+          </button>
+        </form>
+      </section>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Landers Section */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between px-2">
-            <div className="flex items-center gap-2 font-black text-[10px] uppercase text-slate-400 tracking-widest">
-              <Layers size={14} className="text-indigo-500" /> Landers
-            </div>
-            <button className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition-colors border border-transparent hover:border-indigo-100">
-              <Plus size={18} />
-            </button>
-          </div>
-          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-            <div className="divide-y divide-slate-50">
-                {landers.length > 0 ? landers.map((l: any) => (
-                <div key={l.id} className="p-6 flex justify-between items-center group hover:bg-slate-50/50 transition-colors">
-                    <div className="truncate pr-4">
-                        <p className="text-sm font-black text-slate-800">{l.name}</p>
-                        <p className="text-[10px] text-slate-400 truncate font-mono mt-0.5">{l.url}</p>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button className="p-1.5 text-slate-300 hover:text-slate-600"><Edit3 size={14} /></button>
-                        <button className="p-1.5 text-slate-300 hover:text-red-500"><Trash2 size={14} /></button>
-                    </div>
+        {/* Landers */}
+        <div className="space-y-4">
+          <h4 className="flex items-center gap-2 font-black text-[10px] uppercase text-slate-400 tracking-widest px-2"><Layers size={14} /> Landers</h4>
+          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm divide-y overflow-hidden">
+            {landers.map((l: any) => (
+              <div key={l.id} className={`p-5 flex justify-between items-center group transition-colors ${editId === l.id ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}>
+                <div className="truncate pr-4">
+                  <p className="text-sm font-bold text-slate-700">{l.name}</p>
+                  <p className="text-[10px] text-slate-400 truncate">{l.url}</p>
                 </div>
-                )) : (
-                    <div className="p-10 text-center text-xs text-slate-300 font-bold italic">No landers added</div>
-                )}
-            </div>
-          </div>
-        </section>
-
-        {/* Offers Section */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between px-2">
-            <div className="flex items-center gap-2 font-black text-[10px] uppercase text-slate-400 tracking-widest">
-              <Globe size={14} className="text-emerald-500" /> Offers
-            </div>
-            <button className="text-emerald-600 hover:bg-emerald-50 p-1.5 rounded-lg transition-colors border border-transparent hover:border-emerald-100">
-              <Plus size={18} />
-            </button>
-          </div>
-          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-            <div className="divide-y divide-slate-50">
-                {offers.length > 0 ? offers.map((o: any) => (
-                <div key={o.id} className="p-6 flex justify-between items-center group hover:bg-slate-50/50 transition-colors">
-                    <div className="truncate pr-4">
-                        <p className="text-sm font-black text-slate-800">{o.name}</p>
-                        <p className="text-[10px] text-slate-400 truncate font-mono mt-0.5">{o.url}</p>
-                    </div>
-                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button className="p-1.5 text-slate-300 hover:text-slate-600"><Edit3 size={14} /></button>
-                        <button className="p-1.5 text-slate-300 hover:text-red-500"><Trash2 size={14} /></button>
-                    </div>
+                <div className="flex items-center gap-1">
+                  <a href={`?editId=${l.id}&type=landers`} className="p-2 text-slate-200 hover:text-indigo-500 transition-colors"><Edit3 size={16} /></a>
+                  <form action={async () => { 'use server'; await deleteRecord('landers', l.id); revalidatePath('/dashboard/sources'); }}>
+                    <button className="p-2 text-slate-200 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
+                  </form>
                 </div>
-                )) : (
-                    <div className="p-10 text-center text-xs text-slate-300 font-bold italic">No offers added</div>
-                )}
-            </div>
+              </div>
+            ))}
           </div>
-        </section>
+        </div>
 
-        {/* Traffic Sources Section */}
-        <section className="space-y-4">
-          <div className="flex items-center justify-between px-2">
-            <div className="flex items-center gap-2 font-black text-[10px] uppercase text-slate-400 tracking-widest">
-              <Plus size={14} className="text-indigo-600" /> Traffic Sources
-            </div>
-            <button className="text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition-colors border border-transparent hover:border-indigo-100">
-              <Plus size={18} />
-            </button>
+        {/* Offers */}
+        <div className="space-y-4">
+          <h4 className="flex items-center gap-2 font-black text-[10px] uppercase text-slate-400 tracking-widest px-2"><Globe size={14} /> Offers</h4>
+          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm divide-y overflow-hidden">
+            {offers.map((o: any) => (
+              <div key={o.id} className={`p-5 flex justify-between items-center group transition-colors ${editId === o.id ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}>
+                <div className="truncate pr-4">
+                  <p className="text-sm font-bold text-slate-700">{o.name}</p>
+                  <p className="text-[10px] text-slate-400 truncate">{o.url}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <a href={`?editId=${o.id}&type=offers`} className="p-2 text-slate-200 hover:text-indigo-500 transition-colors"><Edit3 size={16} /></a>
+                  <form action={async () => { 'use server'; await deleteRecord('offers', o.id); revalidatePath('/dashboard/sources'); }}>
+                    <button className="p-2 text-slate-200 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
+                  </form>
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-            <div className="divide-y divide-slate-50">
-                {sources.length > 0 ? sources.map((ts: any) => (
-                <div key={ts.id} className="p-6 hover:bg-slate-50/50 transition-colors group relative">
-                    <div className="flex justify-between items-start">
-                        <p className="text-sm font-black text-slate-800">{ts.name}</p>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button className="p-1 text-slate-300 hover:text-slate-600"><Edit3 size={12} /></button>
-                        </div>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5 mt-3">
+        </div>
+
+        {/* Sources */}
+        <div className="space-y-4">
+          <h4 className="flex items-center gap-2 font-black text-[10px] uppercase text-slate-400 tracking-widest px-2"><Zap size={14} /> Sources</h4>
+          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm divide-y overflow-hidden">
+            {sources.map((ts: any) => (
+              <div key={ts.id} className={`p-5 flex justify-between items-start group transition-colors ${editId === ts.id ? 'bg-indigo-50/50' : 'hover:bg-slate-50'}`}>
+                <div>
+                  <p className="text-sm font-bold text-slate-700">{ts.name}</p>
+                  <div className="flex flex-wrap gap-1 mt-1">
                     {ts.params.split(',').map((p: string) => (
-                        <span key={p} className="text-[9px] font-black bg-indigo-50 text-indigo-600 px-2.5 py-1 rounded-lg border border-indigo-100">
-                        {p.trim()}
-                        </span>
+                      <span key={p} className="text-[8px] font-black bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded uppercase">{p.trim()}</span>
                     ))}
-                    </div>
+                  </div>
                 </div>
-                )) : (
-                    <div className="p-10 text-center text-xs text-slate-300 font-bold italic">No sources added</div>
-                )}
-            </div>
+                <div className="flex items-center gap-1">
+                  <a href={`?editId=${ts.id}&type=traffic_sources`} className="p-2 text-slate-200 hover:text-indigo-500 transition-colors"><Edit3 size={16} /></a>
+                  <form action={async () => { 'use server'; await deleteRecord('traffic_sources', ts.id); revalidatePath('/dashboard/sources'); }}>
+                    <button className="p-2 text-slate-200 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
+                  </form>
+                </div>
+              </div>
+            ))}
           </div>
-        </section>
+        </div>
       </div>
     </div>
   );
