@@ -1,7 +1,24 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { ChevronDown } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { ColumnDef } from '@tanstack/react-table';
+import { ArrowUpDown } from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { DataTable } from './data-table';
+
+// Dynamically import ApexCharts to avoid SSR issues
+const Chart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
 interface Campaign {
   id: string;
@@ -11,11 +28,11 @@ interface Campaign {
 
 export default function DrillDownReportPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [selectedCampaign, setSelectedCampaign] = useState('');
+  const [selectedCampaign, setSelectedCampaign] = useState<string | undefined>(undefined);
   const [availableParams, setAvailableParams] = useState<string[]>([]);
-  const [param1, setParam1] = useState('');
-  const [param2, setParam2] = useState('');
-  const [param3, setParam3] = useState('');
+  const [param1, setParam1] = useState<string | undefined>(undefined);
+  const [param2, setParam2] = useState<string | undefined>(undefined);
+  const [param3, setParam3] = useState<string | undefined>(undefined);
   const [reportData, setReportData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -52,9 +69,9 @@ export default function DrillDownReportPage() {
         } else {
           setAvailableParams([]);
         }
-        setParam1('');
-        setParam2('');
-        setParam3('');
+        setParam1(undefined);
+        setParam2(undefined);
+        setParam3(undefined);
         setReportData([]);
       }
     };
@@ -92,102 +109,215 @@ export default function DrillDownReportPage() {
     return availableParams.filter(p => !selected.includes(p));
   }
 
+  const columns: ColumnDef<any>[] = React.useMemo(() => {
+    const dynamicColumns: ColumnDef<any>[] = [];
+    if (param1) dynamicColumns.push({
+      accessorKey: param1,
+      header: param1,
+    });
+    if (param2) dynamicColumns.push({
+      accessorKey: param2,
+      header: param2,
+    });
+    if (param3) dynamicColumns.push({
+      accessorKey: param3,
+      header: param3,
+    });
+
+    return [
+      ...dynamicColumns,
+      {
+        accessorKey: "visits",
+        header: ({ column }) => (
+          <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
+            Visits
+            <ArrowUpDown className="ml-2 h-4 w-4" />
+          </Button>
+        ),
+        cell: ({ row }) => <div className="text-right">{row.getValue("visits")}</div>,
+      },
+      {
+        accessorKey: "clicks",
+        header: ({ column }) => (
+            <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
+              Clicks
+              <ArrowUpDown className="ml-2 h-4 w-4" />
+            </Button>
+          ),
+        cell: ({ row }) => <div className="text-right">{row.getValue("clicks")}</div>,
+      },
+      {
+        accessorKey: "conversions",
+        header: ({ column }) => (
+            <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
+              Conversions
+              <ArrowUpDown className="ml-2 h-4 w-4" />
+            </Button>
+          ),
+        cell: ({ row }) => <div className="text-right">{row.getValue("conversions")}</div>,
+      },
+      {
+        accessorKey: "revenue",
+        header: ({ column }) => (
+            <Button variant="ghost" onClick={() => column.toggleSorting(column.getIsSorted() === "asc")}>
+              Revenue
+              <ArrowUpDown className="ml-2 h-4 w-4" />
+            </Button>
+          ),
+        cell: ({ row }) => {
+          const amount = parseFloat(row.getValue("revenue"))
+          const formatted = new Intl.NumberFormat("en-US", {
+            style: "currency",
+            currency: "USD",
+          }).format(amount)
+ 
+          return <div className="text-right font-medium">{formatted}</div>
+        },
+      },
+    ]
+  }, [param1, param2, param3]);
+
+  const chartOptions: ApexCharts.ApexOptions = {
+    chart: {
+      type: 'bar',
+      height: 350,
+      toolbar: {
+        show: false,
+      }
+    },
+    plotOptions: {
+      bar: {
+        horizontal: false,
+        columnWidth: '55%',
+      },
+    },
+    dataLabels: {
+      enabled: false,
+    },
+    stroke: {
+      show: true,
+      width: 2,
+      colors: ['transparent'],
+    },
+    xaxis: {
+      categories: reportData.map(d => d[param1 as string]),
+    },
+    yaxis: {
+      title: {
+        text: 'Count',
+      },
+    },
+    fill: {
+      opacity: 1,
+    },
+    tooltip: {
+      y: {
+        formatter: function (val) {
+          return val.toString();
+        },
+      },
+    },
+  };
+
+  const chartSeries = [
+    {
+      name: 'Visits',
+      data: reportData.map(d => d.visits),
+    },
+    {
+      name: 'Clicks',
+      data: reportData.map(d => d.clicks),
+    },
+    {
+      name: 'Conversions',
+      data: reportData.map(d => d.conversions),
+    },
+  ];
+
   return (
-    <div className="space-y-8 animate-in fade-in duration-700">
-      <h2 className="text-3xl font-black tracking-tight text-slate-900">Drill-Down Report</h2>
+    <div className="space-y-4">
+      <h2 className="text-3xl font-bold tracking-tight">Drill-Down Report</h2>
 
-      {/* Filters Section */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end p-6 bg-white rounded-2xl border border-slate-100 shadow-sm">
-        <div className="lg:col-span-1">
-          <label htmlFor="campaign" className="text-xs font-bold text-slate-400 uppercase tracking-widest">Campaign</label>
-          <Select value={selectedCampaign} onChange={e => setSelectedCampaign(e.target.value)} disabled={isLoading}>
-            <option value="">{isLoading ? 'Loading...' : 'Select Campaign'}</option>
-            {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </Select>
-        </div>
-        <div className="lg:col-span-1">
-          <label htmlFor="param1" className="text-xs font-bold text-slate-400 uppercase tracking-widest">Tier 1</label>
-          <Select value={param1} onChange={e => setParam1(e.target.value)} disabled={!selectedCampaign}>
-            <option value="">Select Parameter</option>
-            {getFilteredParams(1).map(p => <option key={p} value={p}>{p}</option>)}
-          </Select>
-        </div>
-        <div className="lg:col-span-1">
-          <label htmlFor="param2" className="text-xs font-bold text-slate-400 uppercase tracking-widest">Tier 2</label>
-          <Select value={param2} onChange={e => setParam2(e.target.value)} disabled={!param1}>
-            <option value="">Select Parameter</option>
-            {getFilteredParams(2).map(p => <option key={p} value={p}>{p}</option>)}
-          </Select>
-        </div>
-        <div className="lg:col-span-1">
-          <label htmlFor="param3" className="text-xs font-bold text-slate-400 uppercase tracking-widest">Tier 3</label>
-          <Select value={param3} onChange={e => setParam3(e.target.value)} disabled={!param2}>
-            <option value="">Select Parameter</option>
-            {getFilteredParams(3).map(p => <option key={p} value={p}>{p}</option>)}
-          </Select>
-        </div>
-        <div className="lg:col-span-1">
-          <button 
-            onClick={handleGenerateReport}
-            disabled={isGenerating || !param1}
-            className="w-full bg-indigo-600 text-white px-6 py-2.5 rounded-xl text-sm font-bold uppercase tracking-widest disabled:bg-indigo-300 hover:bg-indigo-700 transition-all"
-          >
-            {isGenerating ? 'Loading...' : 'Generate'}
-          </button>
-        </div>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Filters</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 items-end">
+            <div className="grid gap-2">
+              <Label htmlFor="campaign">Campaign</Label>
+              <Select onValueChange={setSelectedCampaign} value={selectedCampaign} disabled={isLoading}>
+                <SelectTrigger>
+                  <SelectValue placeholder={isLoading ? 'Loading...' : 'Select Campaign'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {campaigns.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="param1">Tier 1</Label>
+              <Select onValueChange={setParam1} value={param1} disabled={!selectedCampaign}>
+                <SelectTrigger>
+                    <SelectValue placeholder="Select Parameter" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getFilteredParams(1).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="param2">Tier 2</Label>
+              <Select onValueChange={setParam2} value={param2} disabled={!param1}>
+                <SelectTrigger>
+                    <SelectValue placeholder="Select Parameter" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getFilteredParams(2).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="param3">Tier 3</Label>
+              <Select onValueChange={setParam3} value={param3} disabled={!param2}>
+                <SelectTrigger>
+                    <SelectValue placeholder="Select Parameter" />
+                </SelectTrigger>
+                <SelectContent>
+                  {getFilteredParams(3).map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <Button 
+              onClick={handleGenerateReport}
+              disabled={isGenerating || !param1}
+            >
+              {isGenerating ? 'Loading...' : 'Generate'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
-      {/* Report Table */}
       {reportData.length > 0 && (
-        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden">
-          <div className="p-8 border-b border-slate-50">
-            <h4 className="font-black text-slate-800 tracking-tight">Report Results</h4>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="text-xs text-slate-500 uppercase bg-slate-50/50">
-                <tr>
-                  <th scope="col" className="px-6 py-3">{param1 || 'Param 1'}</th>
-                  {param2 && <th scope="col" className="px-6 py-3">{param2}</th>}
-                  {param3 && <th scope="col" className="px-6 py-3">{param3}</th>}
-                  <th scope="col" className="px-6 py-3 text-right">Visits</th>
-                  <th scope="col" className="px-6 py-3 text-right">Clicks</th>
-                  <th scope="col" className="px-6 py-3 text-right">Conversions</th>
-                  <th scope="col" className="px-6 py-3 text-right">Revenue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reportData.map((row, i) => (
-                  <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/50">
-                    <td className="px-6 py-4 font-medium text-slate-800">{row[param1]}</td>
-                    {param2 && <td className="px-6 py-4 text-slate-600">{row[param2]}</td>}
-                    {param3 && <td className="px-6 py-4 text-slate-600">{row[param3]}</td>}
-                    <td className="px-6 py-4 text-right font-mono text-slate-800">{row.visits.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-right font-mono text-slate-800">{row.clicks.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-right font-mono text-green-600 font-bold">{row.conversions.toLocaleString()}</td>
-                    <td className="px-6 py-4 text-right font-mono text-green-600 font-bold">${row.revenue.toFixed(2)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Report Chart</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Chart options={chartOptions} series={chartSeries} type="bar" height={350} />
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Report Results</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <DataTable columns={columns} data={reportData} />
+            </CardContent>
+          </Card>
         </div>
       )}
-    </div>
-  );
-}
-
-// A reusable Select component to keep the UI consistent
-function Select({ children, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <div className="relative w-full">
-      <select
-        {...props}
-        className="w-full appearance-none bg-white border border-slate-200 text-slate-800 rounded-xl px-4 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
-      >
-        {children}
-      </select>
-      <ChevronDown size={18} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
     </div>
   );
 }
