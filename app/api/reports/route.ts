@@ -24,9 +24,13 @@ async function getCfEnv(req: NextRequest) {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const campaignId = searchParams.get('campaignId');
-  const param1 = searchParams.get('param1');
-  const param2 = searchParams.get('param2');
-  const param3 = searchParams.get('param3');
+  let param1 = searchParams.get('param1');
+  let param2 = searchParams.get('param2');
+  let param3 = searchParams.get('param3');
+
+  if (param1 === 'null') param1 = null;
+  if (param2 === 'null') param2 = null;
+  if (param3 === 'null') param3 = null;
 
   if (!campaignId || !param1) {
     return NextResponse.json({ error: 'Missing required query parameters' }, { status: 400 });
