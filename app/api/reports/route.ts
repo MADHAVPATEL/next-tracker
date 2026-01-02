@@ -55,12 +55,12 @@ export async function GET(req: NextRequest) {
     const query = `
       SELECT 
         ${selectFields},
-        SUM(CASE WHEN blob2 = 'visit' THEN double1 ELSE 0 END) as visits,
-        SUM(CASE WHEN blob2 = 'lander_click' THEN double1 ELSE 0 END) as clicks,
-        SUM(CASE WHEN blob2 = 'conversion' THEN 1 ELSE 0 END) as conversions,
-        SUM(CASE WHEN blob2 = 'conversion' THEN double1 ELSE 0 END) as revenue
+        SUM(CASE WHEN blob1 = 'visit' THEN double1 ELSE 0 END) as visits,
+        SUM(CASE WHEN blob1 = 'lander_click' THEN double1 ELSE 0 END) as clicks,
+        SUM(CASE WHEN blob1 = 'conversion' THEN 1 ELSE 0 END) as conversions,
+        SUM(CASE WHEN blob1 = 'conversion' THEN double1 ELSE 0 END) as revenue
       FROM ClickLogs
-      WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob1 = '${campaignId}'
+      WHERE timestamp > NOW() - INTERVAL '30' DAY AND blob0 = '${campaignId}'
       GROUP BY ${groupByFields}
       ORDER BY visits DESC
       LIMIT 100
