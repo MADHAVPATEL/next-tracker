@@ -22,8 +22,8 @@ export async function GET(request: Request) {
     const context = getRequestContext();
     const env = context.env as CloudflareEnv;
 
-    if (!env.CAMPAIGNS) {
-      throw new Error("KV Binding 'CAMPAIGNS' not found");
+    if (!env.CAMPAIGNS || !env.CLICK_PARAMS) {
+      throw new Error("Required KV Bindings ('CAMPAIGNS', 'CLICK_PARAMS') not found");
     }
 
     const campaignData = await env.CAMPAIGNS.get(slug);
@@ -38,17 +38,20 @@ export async function GET(request: Request) {
     const paramKeys = (campaign.params || "").split(",").map((k: string) => k.trim());
     const paramValues = paramKeys.map((k: string) => searchParams.get(k) || "none");
 
+    // Store the params against the clickId for later retrieval
+    await env.CLICK_PARAMS.put(clickId, JSON.stringify(paramValues));
+
     if (env.ANALYTICS) {
       env.ANALYTICS.writeDataPoint({
         blobs: [
           slug, 
           "visit", 
           clickId, 
-          // @ts-ignore - cf property added by Cloudflare at runtime
-          request.cf?.country || "XX",
           paramValues[0] || "",
           paramValues[1] || "",
-          paramValues[2] || ""
+          paramValues[2] || "",
+          // @ts-ignore - cf property added by Cloudflare at runtime
+          request.cf?.country || "XX",
         ],
         doubles: [1],
         indexes: [slug]

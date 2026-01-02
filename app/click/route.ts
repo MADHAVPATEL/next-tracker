@@ -21,10 +21,21 @@ export async function GET(request: Request) {
 
     const campaign = JSON.parse(campaignData);
 
+    // Retrieve stored params for this click
+    const storedParams = cid ? await env.CLICK_PARAMS.get(cid) : null;
+    const params = storedParams ? JSON.parse(storedParams) : ["none", "none", "none"];
+
     // 2. Log Lander Click to Analytics Engine
     if (env.ANALYTICS) {
       env.ANALYTICS.writeDataPoint({
-        blobs: [cmp, "lander_click", cid || "no-id", "XX"],
+        blobs: [
+          cmp, 
+          "lander_click", 
+          cid || "no-id",
+          params[0],
+          params[1],
+          params[2]
+        ],
         doubles: [1],
         indexes: [cmp]
       });

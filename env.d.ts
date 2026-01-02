@@ -12,6 +12,9 @@ declare global {
     
     // KV Namespace for fast redirect lookups
     CAMPAIGNS: KVNamespace;
+
+    // KV Namespace for storing click-to-parameter mappings
+    CLICK_PARAMS: KVNamespace;
     
     // Analytics Engine for tracking events
     ANALYTICS?: {
